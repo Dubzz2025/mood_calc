@@ -111,9 +111,10 @@ def show_monthly_view():
         col.markdown(f"**{weekdays[i]}**")
     
     for week in cal:
-        cols = st.columns(7)
-        for i, day in enumerate(week):
-            with cols[i]:
+        # Create columns for the current week
+week_cols = st.columns(len(week))
+for i, day in enumerate(week):
+    with week_cols[i]:
                 if day == 0:
                     st.write("")
                 else:
@@ -374,10 +375,6 @@ with st.sidebar:
     else:
         st.info("Add people first")
 
-# Main content
-if st.session_state.current_view == "Monthly":
-    show_monthly_view()
-elif st.session_state.current_view == "Weekly":
-    show_weekly_view()
-else:
-    show_yearly_view()
+
+
+
