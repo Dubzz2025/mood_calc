@@ -29,8 +29,7 @@ CYCLE_PRESETS = {
         {'name': 'Menstrual', 'start_day': 1, 'end_day': 5, 'mood': 'Menstruation'},
         {'name': 'Follicular', 'start_day': 6, 'end_day': 13, 'mood': 'Follicular'},
         {'name': 'Ovulation', 'start_day': 14, 'end_day': 14, 'mood': 'Ovulation'},
-        {'name': 'Luteal', 'start_day': 15, 'end_day': 28, 'mood': 'L极速赛车开奖直播官网
-uteal'}
+        {'name': 'Luteal', 'start_day': 15, 'end_day': 28, 'mood': 'Luteal'}
     ],
     "Fertility Focused": [
         {'name': 'Menstrual', 'start_day': 1, 'end_day': 5, 'mood': 'Menstruation'},
