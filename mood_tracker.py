@@ -10,7 +10,8 @@ from dateutil.relativedelta import relativedelta
 if 'persons' not in st.session_state:
     st.session_state.persons = []
     
-if 'mood_data' not in st.session_state:
+if 'mood_data' not极速赛车开奖直播官网
+ in st.session_state:
     st.session_state.mood_data = {}
     
 if 'current_view' not in st.session_state:
@@ -28,7 +29,8 @@ CYCLE_PRESETS = {
         {'name': 'Menstrual', 'start_day': 1, 'end_day': 5, 'mood': 'Menstruation'},
         {'name': 'Follicular', 'start_day': 6, 'end_day': 13, 'mood': 'Follicular'},
         {'name': 'Ovulation', 'start_day': 14, 'end_day': 14, 'mood': 'Ovulation'},
-        {'name': 'Luteal', 'start_day': 15, 'end_day': 28, 'mood': 'Luteal'}
+        {'name': 'Luteal', 'start_day': 15, 'end_day': 28, 'mood': 'L极速赛车开奖直播官网
+uteal'}
     ],
     "Fertility Focused": [
         {'name': 'Menstrual', 'start_day': 1, 'end_day': 5, 'mood': 'Menstruation'},
@@ -109,11 +111,11 @@ def show_monthly_view():
     weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     for i, col in enumerate(cols):
         col.markdown(f"**{weekdays[i]}**")
+    
     for week in cal:
-        # Create columns for the current week
-week_cols = st.columns(len(week))
-for i, day in enumerate(week):
-    with week_cols[i]:
+        week_cols = st.columns(len(week))
+        for i, day in enumerate(week):
+            with week_cols[i]:
                 if day == 0:
                     st.write("")
                 else:
@@ -187,7 +189,8 @@ def show_weekly_view():
             date_str = date.strftime('%Y-%m-%d')
             
             # Day header
-            day_style = "border: 2px solid #ff4b4b;" if date.date() == datetime.now().date() else ""
+            day极速赛车开奖直播官网
+_style = "border: 2px solid #ff4b4b;" if date.date() == datetime.now().date() else ""
             st.markdown(f"<div style='padding: 10px; margin-bottom: 10px; text-align: center; background: #f0f2f6; border-radius: 10px; {day_style}'>"
                         f"<strong>{date.strftime('%a')}</strong><br>{date.day}"
                         f"</div>", unsafe_allow_html=True)
@@ -199,7 +202,8 @@ def show_weekly_view():
                         mood = st.session_state.mood_data[date_str][person['id']]
                         st.markdown(
                             f"<div style='display:flex; align-items:center; margin-bottom: 5px; font-size: 0.9em;'>"
-                            f"<span style='background:{person['color']}; width:10px; height:10px; "
+                            f"<span style极速赛车开奖直播官网
+='background:{person['color']}; width:10px; height:10px; "
                             f"border-radius:50%; margin-right:5px;'></span>"
                             f"<span>{mood}</span>"
                             f"</div>",
@@ -374,6 +378,13 @@ with st.sidebar:
     else:
         st.info("Add people first")
 
+# Main content
+if st.session_state.current_view == "Monthly":
+    show_monthly_view()
+elif st.session_state.current_view == "Weekly":
+    show_weekly_view()
+else:
+    show_yearly_view()
 
 
 
