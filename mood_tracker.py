@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
-# --- 1. Database & Schema Maintenance ---
+# --- 1. Database Management ---
 def init_db():
     conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
     c = conn.cursor()
@@ -16,7 +16,7 @@ def init_db():
                  (date TEXT, person_id INTEGER, mood TEXT, notes TEXT,
                   PRIMARY KEY (date, person_id))''')
     
-    # Ensure 'notes' column exists (Migration)
+    # Check for 'notes' column
     c.execute("PRAGMA table_info(mood_entries)")
     columns = [column[1] for column in c.fetchall()]
     if 'notes' not in columns:
@@ -56,7 +56,8 @@ def update_mood_entry(date_str, person_id, mood, notes=None):
     conn.commit()
     conn.close()
 
-# --- 2. Cycle Tool Presets ---
+# --- 2. Cycle Logic ---
+# 
 CYCLE_PRESETS = {
     "Mood Cycle (Standard)": [
         {'start': 1, 'end': 5, 'mood': '🩸 Flow'},
@@ -158,4 +159,4 @@ def render_day(date_obj):
             with st.popover("Edit", use_container_width=True):
                 for p in persons:
                     st.markdown(f"**{p['name']}**")
-                    cols =
+                    cols = st.columns
