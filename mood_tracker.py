@@ -62,6 +62,14 @@ def update_mood_entry(date_str, person_id, mood, notes=None):
     conn.commit()
     conn.close()
 
+def update_person_full(p_id, name, color, moods):
+    conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute("UPDATE persons SET name=?, color=?, moods=? WHERE id=?", 
+              (name, color, json.dumps(moods), p_id))
+    conn.commit()
+    conn.close()
+
 def delete_person_db(p_id):
     conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
     c = conn.cursor()
@@ -70,7 +78,7 @@ def delete_person_db(p_id):
     conn.commit()
     conn.close()
 
-# --- 2. Cycle Tool Presets & Logic ---
+# --- 2. Cycle Tool Logic ---
 CYCLE_PRESETS = {
     "Standard Cycle": [
         {'start': 1, 'end': 5, 'mood': '🩸 Flow'},
@@ -96,7 +104,6 @@ def apply_cycle_logic(person_id, start_date, cycle_length, apply_future, preset_
     current_date_obj = start_date
     cycles = 3 if apply_future else 1
     template = CYCLE_PRESETS[preset_name]
-    
     for _ in range(cycles):
         for day_idx in range(cycle_length):
             cycle_day = day_idx + 1
@@ -114,7 +121,7 @@ if 'current_date' not in st.session_state:
 
 persons = get_persons()
 mood_data = load_mood_data()
-DEFAULT_MOODS = ["😊 Happy", "😢 Sad", "😠 Angry", "😴 Tired", "💪 Energetic", "😐 Neutral", "🩸 Flow", "⚡ PMT", "✨ Fertile", "🎈 Bloated"]
+MASTER_MOOD_BANK = ["😊 Happy", "😢 Sad", "😠 Angry", "😴 Tired", "💪 Energetic", "😐 Neutral", "🩸 Flow", "⚡ PMT", "✨ Fertile", "🎈 Bloated", "🩹 Post-Flow", "🥚 Ovulation", "🧘 Calm", "🍕 Cravings"]
 
 # --- 4. Sidebar UI ---
 with st.sidebar:
@@ -122,12 +129,13 @@ with st.sidebar:
     view_mode = st.radio("Switch View", ["Monthly", "Weekly"])
     
     with st.expander("👤 Profile Settings"):
-        tab_edit, tab_add = st.tabs(["Edit/Delete", "Add New"])
+        tab_edit, tab_add = st.tabs(["Edit Moods/Color", "Add New Person"])
+        
         with tab_add:
             with st.form("new_p"):
                 name = st.text_input("Name")
                 color = st.color_picker("Color", "#FF4B4B")
-                moods = st.multiselect("Moods", DEFAULT_MOODS, default=DEFAULT_MOODS[:6])
+                moods = st.multiselect("Initial Moods", MASTER_MOOD_BANK, default=MASTER_MOOD_BANK[:6])
                 if st.form_submit_button("Create"):
                     conn = sqlite3.connect('mood_tracker.db'); c = conn.cursor()
                     c.execute("INSERT INTO persons (name, color, moods) VALUES (?, ?, ?)", (name, color, json.dumps(moods)))
@@ -137,11 +145,17 @@ with st.sidebar:
             if persons:
                 p_name = st.selectbox("Select Profile", [p['name'] for p in persons])
                 p_to_edit = next(p for p in persons if p['name'] == p_name)
-                new_color = st.color_picker("Change Color", p_to_edit['color'], key="upd_col")
-                if st.button("Update Color"):
-                    conn = sqlite3.connect('mood_tracker.db'); c = conn.cursor()
-                    c.execute("UPDATE persons SET color=? WHERE id=?", (new_color, p_to_edit['id']))
-                    conn.commit(); conn.close(); st.rerun()
+                
+                # Edit Area
+                with st.form(f"edit_form_{p_to_edit['id']}"):
+                    upd_name = st.text_input("Name", p_to_edit['name'])
+                    upd_color = st.color_picker("Color", p_to_edit['color'])
+                    upd_moods = st.multiselect("Edit Mood List", MASTER_MOOD_BANK, default=p_to_edit['moods'])
+                    
+                    if st.form_submit_button("Save Changes"):
+                        update_person_full(p_to_edit['id'], upd_name, upd_color, upd_moods)
+                        st.rerun()
+                
                 st.divider()
                 if st.button(f"🗑️ Delete {p_name}", type="primary"):
                     delete_person_db(p_to_edit['id']); st.rerun()
@@ -152,10 +166,7 @@ with st.sidebar:
         st.subheader("Mood Cycle Tool")
         target_p = st.selectbox("Apply to", [p['name'] for p in persons], key="cycle_p")
         p_obj = next(p for p in persons if p['name'] == target_p)
-        
-        # --- Dropdown for Cycle Choices ---
         cycle_choice = st.selectbox("Select Cycle Type", list(CYCLE_PRESETS.keys()))
-        
         c_start = st.date_input("Start Date", value=datetime.now())
         c_len = st.slider("Cycle Length", 21, 35, 28)
         c_future = st.checkbox("Apply 3 cycles?", value=True)
@@ -200,30 +211,5 @@ def render_day_cell(date_obj):
 
 # --- 6. Main View Switcher ---
 c1, c2, c3 = st.columns([1, 4, 1])
-
 if view_mode == "Monthly":
-    if c1.button("◀"): st.session_state.current_date -= relativedelta(months=1); st.rerun()
-    c2.header(st.session_state.current_date.strftime('%B %Y'))
-    if c3.button("▶"): st.session_state.current_date += relativedelta(months=1); st.rerun()
-    
-    cal = calendar.monthcalendar(st.session_state.current_date.year, st.session_state.current_date.month)
-    cols = st.columns(7)
-    for i, d in enumerate(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']): cols[i].write(f"**{d}**")
-    for week in cal:
-        cols = st.columns(7)
-        for i, day in enumerate(week):
-            if day != 0:
-                with cols[i]: render_day_cell(datetime(st.session_state.current_date.year, st.session_state.current_date.month, day))
-
-else: # Weekly View
-    if c1.button("◀ Week"): st.session_state.current_date -= timedelta(days=7); st.rerun()
-    c2.header(f"Week of {st.session_state.current_date.strftime('%b %d, %Y')}")
-    if c3.button("Week ▶"): st.session_state.current_date += timedelta(days=7); st.rerun()
-    
-    start_of_week = st.session_state.current_date - timedelta(days=st.session_state.current_date.weekday())
-    cols = st.columns(7)
-    for i in range(7):
-        day = start_of_week + timedelta(days=i)
-        with cols[i]:
-            st.write(f"**{day.strftime('%a %d')}**")
-            render_day_cell(day)
+    if c
