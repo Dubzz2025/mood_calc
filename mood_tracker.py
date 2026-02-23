@@ -1,28 +1,106 @@
 import streamlit as st
 import calendar
+import sqlite3
+import json
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import plotly.express as px
 from dateutil.relativedelta import relativedelta
 
-# Initialize session state
-if 'persons' not in st.session_state:
-    st.session_state.persons = []
-    
-if 'mood_data' not in st.session_state:
-    st.session_state.mood_data = {}
-    
+# --- Database Functions ---
+def init_db():
+    conn = sqlite3.connect('mood_tracker.db')
+    c = conn.cursor()
+    # Create tables
+    c.execute('''CREATE TABLE IF NOT EXISTS persons
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, color TEXT, moods TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS mood_entries
+                 (date TEXT, person_id INTEGER, mood TEXT,
+                  PRIMARY KEY (date, person_id))''')
+    conn.commit()
+    conn.close()
+
+def get_persons():
+    conn = sqlite3.connect('mood_tracker.db')
+    try:
+        df = pd.read_sql_query("SELECT * FROM persons", conn)
+        persons = []
+        for _, row in df.iterrows():
+            persons.append({
+                'id': row['id'],
+                'name': row['name'],
+                'color': row['color'],
+                'moods': json.loads(row['moods'])
+            })
+        return persons
+    except:
+        return []
+    finally:
+        conn.close()
+
+def add_person_db(name, color, moods):
+    conn = sqlite3.connect('mood_tracker.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO persons (name, color, moods) VALUES (?, ?, ?)",
+              (name, color, json.dumps(moods)))
+    conn.commit()
+    conn.close()
+
+def delete_person_db(person_id):
+    conn = sqlite3.connect('mood_tracker.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM persons WHERE id = ?", (person_id,))
+    c.execute("DELETE FROM mood_entries WHERE person_id = ?", (person_id,))
+    conn.commit()
+    conn.close()
+
+def get_mood_data():
+    conn = sqlite3.connect('mood_tracker.db')
+    try:
+        df = pd.read_sql_query("SELECT * FROM mood_entries", conn)
+        mood_data = {}
+        for _, row in df.iterrows():
+            if row['date'] not in mood_data:
+                mood_data[row['date']] = {}
+            mood_data[row['date']][row['person_id']] = row['mood']
+        return mood_data
+    except:
+        return {}
+    finally:
+        conn.close()
+
+def update_mood_entry(date_str, person_id, mood):
+    conn = sqlite3.connect('mood_tracker.db')
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO mood_entries (date, person_id, mood) VALUES (?, ?, ?)",
+              (date_str, person_id, mood))
+    conn.commit()
+    conn.close()
+
+def delete_mood_entry(date_str, person_id):
+    conn = sqlite3.connect('mood_tracker.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM mood_entries WHERE date = ? AND person_id = ?", (date_str, person_id))
+    conn.commit()
+    conn.close()
+
+# --- Initialize ---
+init_db()
+
+# Initialize session state configuration
 if 'current_view' not in st.session_state:
     st.session_state.current_view = "Monthly"
-    
 if 'current_date' not in st.session_state:
     st.session_state.current_date = datetime.now()
+
+# Load data from DB
+persons = get_persons()
+mood_data = get_mood_data()
 
 # Predefined mood options
 DEFAULT_MOODS = ["😊 Happy", "😢 Sad", "😠 Angry", "😨 Anxious", "😴 Tired", "💪 Energetic", "😐 Neutral"]
 
-# Predefined cycle templates
 CYCLE_PRESETS = {
     "Standard 28-day": [
         {'name': 'Menstrual', 'start_day': 1, 'end_day': 5, 'mood': 'Menstruation'},
@@ -45,43 +123,72 @@ CYCLE_PRESETS = {
     ]
 }
 
-# Function to update mood data
-def update_mood_data(date, person_id, mood):
-    date_str = date.strftime('%Y-%m-%d')
-    if date_str not in st.session_state.mood_data:
-        st.session_state.mood_data[date_str] = {}
-    st.session_state.mood_data[date_str][person_id] = mood
-
-# Function to apply menstrual cycle
 def apply_menstrual_cycle(person_id, start_date, cycle_template, cycle_length, apply_future):
-    applied_dates = []
-    current_date = start_date
+    current_date_obj = start_date
     cycles = 3 if apply_future else 1
     
     for _ in range(cycles):
-        # Apply phase moods for each day in cycle
         for day in range(cycle_length):
             cycle_day = day + 1
-            
-            # Find matching phase
             applied = False
             for phase in cycle_template:
                 if phase['start_day'] <= cycle_day <= phase['end_day']:
-                    update_mood_data(current_date, person_id, phase['mood'])
-                    applied_dates.append(current_date)
+                    update_mood_entry(current_date_obj.strftime('%Y-%m-%d'), person_id, phase['mood'])
                     applied = True
                     break
-            
-            # Default mood if no phase matches
             if not applied:
-                update_mood_data(current_date, person_id, "Normal")
-                applied_dates.append(current_date)
+                update_mood_entry(current_date_obj.strftime('%Y-%m-%d'), person_id, "Normal")
             
-            current_date += timedelta(days=1)
-    
-    return applied_dates
+            current_date_obj += timedelta(days=1)
 
-# --- Calendar Views ---
+# --- Views ---
+def render_day_cell(date_obj):
+    date_str = date_obj.strftime('%Y-%m-%d')
+    day_num = date_obj.day
+    
+    # Check if today
+    today_style = "border: 2px solid #ff4b4b; border-radius: 5px;" if date_obj.date() == datetime.now().date() else ""
+    
+    # Outer container
+    with st.container(border=True):
+        st.markdown(f"<div style='text-align: center; margin-bottom: 5px; font-weight: bold; {today_style}'>{day_num}</div>", unsafe_allow_html=True)
+        
+        # 1. Existing Moods
+        if date_str in mood_data:
+            for person in persons:
+                if person['id'] in mood_data[date_str]:
+                    mood = mood_data[date_str][person['id']]
+                    st.markdown(
+                        f"<div style='display:flex; align-items:center; margin-bottom: 2px; font-size: 0.8em;'>"
+                        f"<span style='background:{person['color']}; width:8px; height:8px; border-radius:50%; margin-right:4px;'></span>"
+                        f"{mood}"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+
+        # 2. Add/Edit Popover
+        if persons:
+            with st.popover("➕", use_container_width=True):
+                st.caption(f"Edit {date_str}")
+                for person in persons:
+                    st.markdown(f"**{person['name']}**")
+                    
+                    # Current status
+                    current_mood = mood_data.get(date_str, {}).get(person['id'], None)
+                    if current_mood:
+                        st.info(f"Current: {current_mood}")
+                        if st.button("🗑️ Clear", key=f"del_{date_str}_{person['id']}"):
+                            delete_mood_entry(date_str, person['id'])
+                            st.rerun()
+
+                    # Mood Buttons
+                    cols = st.columns(3)
+                    for i, mood_opt in enumerate(person['moods']):
+                        if cols[i % 3].button(mood_opt, key=f"btn_{date_str}_{person['id']}_{i}"):
+                            update_mood_entry(date_str, person['id'], mood_opt)
+                            st.rerun()
+                    st.divider()
+
 def show_monthly_view():
     st.header(f"{st.session_state.current_date.strftime('%B %Y')}")
     
@@ -91,25 +198,25 @@ def show_monthly_view():
     )
     
     # Navigation
-    prev_month = st.session_state.current_date - relativedelta(months=1)
-    next_month = st.session_state.current_date + relativedelta(months=1)
-    
     col1, col2, col3 = st.columns([1, 2, 1])
     with col1:
-        if st.button("◀ Previous Month", use_container_width=True):
-            st.session_state.current_date = prev_month
+        if st.button("◀ Prev"):
+            st.session_state.current_date -= relativedelta(months=1)
+            st.rerun()
     with col2:
-        st.caption(st.session_state.current_date.strftime("%B %Y"))
+        st.caption("Navigate Months")
     with col3:
-        if st.button("Next Month ▶", use_container_width=True):
-            st.session_state.current_date = next_month
+        if st.button("Next ▶"):
+            st.session_state.current_date += relativedelta(months=1)
+            st.rerun()
     
-    # Create calendar grid
+    # Calendar Header
     cols = st.columns(7)
     weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     for i, col in enumerate(cols):
         col.markdown(f"**{weekdays[i]}**")
     
+    # Grid
     for week in cal:
         week_cols = st.columns(len(week))
         for i, day in enumerate(week):
@@ -122,265 +229,139 @@ def show_monthly_view():
                         st.session_state.current_date.month,
                         day
                     )
-                    date_str = current_date.strftime('%Y-%m-%d')
-                    
-                    # Day header
-                    today_style = "border: 2px solid #ff4b4b; border-radius: 5px;" if current_date.date() == datetime.now().date() else ""
-                    st.markdown(f"<div style='padding: 5px; margin-bottom: 5px; {today_style}'>"
-                                f"<strong>{day}</strong></div>", 
-                                unsafe_allow_html=True)
-                    
-                    # Mood entries
-                    if date_str in st.session_state.mood_data:
-                        for person in st.session_state.persons:
-                            if person['id'] in st.session_state.mood_data[date_str]:
-                                mood = st.session_state.mood_data[date_str][person['id']]
-                                st.markdown(
-                                    f"<div style='display:flex; align-items:center; margin-bottom: 3px;'>"
-                                    f"<span style='background:{person['color']}; width:12px; height:12px; "
-                                    f"border-radius:50%; margin-right:5px;'></span>"
-                                    f"<span>{mood}</span>"
-                                    f"</div>",
-                                    unsafe_allow_html=True
-                                )
-                    
-                    # Mood buttons
-                    if st.session_state.persons:
-                        with st.expander("+", expanded=False):
-                            for person in st.session_state.persons:
-                                st.markdown(f"**{person['name']}**")
-                                cols = st.columns(4)
-                                for i, mood in enumerate(person['moods']):
-                                    if i % 4 == 0 and i > 0:
-                                        cols = st.columns(4)
-                                    if cols[i % 4].button(mood, key=f"btn_{date_str}_{person['id']}_{i}", 
-                                                         use_container_width=True):
-                                        update_mood_data(current_date, person['id'], mood)
-                                        st.experimental_rerun()
+                    render_day_cell(current_date)
 
 def show_weekly_view():
     st.header(f"Week of {st.session_state.current_date.strftime('%b %d')}")
     
-    # Get start of week (Monday)
+    # Start of week (Monday)
     start_date = st.session_state.current_date - timedelta(days=st.session_state.current_date.weekday())
+    
+    # Navigation
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col1:
+        if st.button("◀ Prev Week"):
+            st.session_state.current_date -= timedelta(weeks=1)
+            st.rerun()
+    with col3:
+        if st.button("Next Week ▶"):
+            st.session_state.current_date += timedelta(weeks=1)
+            st.rerun()
+            
+    # Weekly Grid
+    cols = st.columns(7)
     days = [start_date + timedelta(days=i) for i in range(7)]
     
-    # Navigation
-    prev_week = st.session_state.current_date - timedelta(weeks=1)
-    next_week = st.session_state.current_date + timedelta(weeks=1)
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("◀ Previous Week", use_container_width=True):
-            st.session_state.current_date = prev_week
-    with col2:
-        st.caption(f"{days[0].strftime('%b %d')} - {days[6].strftime('%b %d')}")
-    with col3:
-        if st.button("Next Week ▶", use_container_width=True):
-            st.session_state.current_date = next_week
-    
-    # Weekly grid
-    cols = st.columns(7)
-    for i, col in enumerate(cols):
-        with col:
-            date = days[i]
-            date_str = date.strftime('%Y-%m-%d')
-            
-                       # Day header
-            day_style = "border: 2px solid #ff4b4b;" if date.date() == datetime.now().date() else ""
-            st.markdown(f"<div style='padding: 10px; margin-bottom: 10px; text-align: center; background: #f0f2f6; border-radius: 10px; {day_style}'>"
-                        f"<strong>{date.strftime('%a')}</strong><br>{date.day}"
-                        f"</div>", unsafe_allow_html=True)
-            
-            # Mood entries
-            if date_str in st.session_state.mood_data:
-                for person in st.session_state.persons:
-                    if person['id'] in st.session_state.mood_data[date_str]:
-                        mood = st.session_state.mood_data[date_str][person['id']]
-                        st.markdown(
-                            f"<div style='display:flex; align-items:center; margin-bottom: 5px; font-size: 0.9em;'>"
-                            f"<span style='background:{person['color']}; width:10px; height:10px; "
-                            f"border-radius:50%; margin-right:5px;'></span>"
-                            f"<span>{mood}</span>"
-                            f"</div>",
-                            unsafe_allow_html=True
-                        )
-            
-            # Mood buttons
-            if st.session_state.persons:
-                with st.expander("+ Moods", expanded=False):
-                    for person in st.session_state.persons:
-                        st.markdown(f"**{person['name']}**")
-                        cols = st.columns(4)
-                        for i, mood in enumerate(person['moods']):
-                            if i % 4 == 0 and i > 0:
-                                cols = st.columns(4)
-                            if cols[i % 4].button(mood, key=f"btn_{date_str}_{person['id']}_{i}", 
-                                                 use_container_width=True):
-                                update_mood_data(date, person['id'], mood)
-                                st.experimental_rerun()
+    for i, date_obj in enumerate(days):
+        with cols[i]:
+            st.markdown(f"**{date_obj.strftime('%a')}**")
+            render_day_cell(date_obj)
 
 def show_yearly_view():
-    st.header(f"{st.session_state.current_date.year} Mood Overview")
+    st.header(f"{st.session_state.current_date.year} Overview")
     
-    # Navigation
-    prev_year = st.session_state.current_date - relativedelta(years=1)
-    next_year = st.session_state.current_date + relativedelta(years=1)
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("◀ Previous Year", use_container_width=True):
-            st.session_state.current_date = prev_year
-    with col2:
-        st.caption(str(st.session_state.current_date.year))
-    with col3:
-        if st.button("Next Year ▶", use_container_width=True):
-            st.session_state.current_date = next_year
-    
-    # Mood heatmap
     heatmap_data = []
     year = st.session_state.current_date.year
     
-    for month in range(1, 13):
-        days_in_month = calendar.monthrange(year, month)[1]
-        for day in range(1, days_in_month + 1):
-            date = datetime(year, month, day)
-            date_str = date.strftime('%Y-%m-%d')
-            mood_count = len(st.session_state.mood_data.get(date_str, {}))
-            heatmap_data.append({
-                'Date': date,
-                'Month': date.strftime('%B'),
-                'Day': day,
-                'Mood Count': mood_count
-            })
-    
+    # Process data for heatmap
+    # Use direct query logic as mood_data is already dict
+    for date_str, entries in mood_data.items():
+        try:
+            d = datetime.strptime(date_str, '%Y-%m-%d')
+            if d.year == year:
+                heatmap_data.append({
+                    'Date': d,
+                    'Month': d.strftime('%B'),
+                    'Day': d.day,
+                    'Count': len(entries)
+                })
+        except:
+            pass
+
     if heatmap_data:
-        heatmap_df = pd.DataFrame(heatmap_data)
-        
-        # Create heatmap
+        df = pd.DataFrame(heatmap_data)
         fig = px.density_heatmap(
-            heatmap_df,
-            x='Day',
-            y='Month',
-            z='Mood Count',
+            df, x='Day', y='Month', z='Count',
             histfunc="sum",
             category_orders={"Month": list(calendar.month_name)[1:]},
             color_continuous_scale='Blues',
-            title="Mood Frequency Heatmap"
+            title="Activity Heatmap"
         )
-        
-        # Make clickable
-        fig.update_layout(
-            clickmode='event+select',
-            yaxis={'categoryorder': 'array', 'categoryarray': list(calendar.month_name)[1:]}
-        )
-        
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Drill-down on click
-        if st.session_state.get('heatmap_click'):
-            click_data = st.session_state.heatmap_click
-            month_name = click_data['points'][0]['y']
-            day = click_data['points'][0]['x']
-            month_num = list(calendar.month_name).index(month_name)
-            
-            st.session_state.current_date = datetime(year, month_num, 1)
-            st.session_state.current_view = "Monthly"
-            st.experimental_rerun()
     else:
-        st.info("No mood data recorded this year")
+        st.info("No data for this year.")
+        
+    # Stats
+    all_moods = []
+    for entries in mood_data.values():
+        all_moods.extend(entries.values())
     
-    # Mood statistics pie chart
-    if st.session_state.mood_data:
-        mood_counts = {}
-        for date_data in st.session_state.mood_data.values():
-            for mood in date_data.values():
-                mood_counts[mood] = mood_counts.get(mood, 0) + 1
-        
-        mood_df = pd.DataFrame({
-            'Mood': list(mood_counts.keys()),
-            'Count': list(mood_counts.values())
-        })
-        
-        fig = px.pie(mood_df, names='Mood', values='Count', title="Mood Distribution")
-        st.plotly_chart(fig, use_container_width=True)
+    if all_moods:
+        mood_series = pd.Series(all_moods)
+        fig_pie = px.pie(names=mood_series.unique(), values=mood_series.value_counts(), title="Overall Mood Distribution")
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-# --- Main App ---
-st.set_page_config(layout="wide", page_title="Simple Mood Tracker", page_icon="😊")
+# --- App Layout ---
+st.set_page_config(layout="wide", page_title="Mood Tracker", page_icon="😊")
 
-# Sidebar
 with st.sidebar:
-    st.title("😊 Mood Tracker")
+    st.title("Settings")
     
-    # View selection
-    view_option = st.radio("Calendar View", ["Monthly", "Weekly", "Yearly"], 
-                          index=["Monthly", "Weekly", "Yearly"].index(st.session_state.current_view))
-    st.session_state.current_view = view_option
+    # View Switcher
+    view = st.radio("View", ["Monthly", "Weekly", "Yearly"])
+    st.session_state.current_view = view
     
-    # Add person form
     st.divider()
+    
+    # Add Person
     st.subheader("Add Person")
-    with st.form("add_person_form"):
+    with st.form("new_person"):
         name = st.text_input("Name")
         color = st.color_picker("Color", "#FF0000")
-        moods = st.multiselect("Mood Options", DEFAULT_MOODS, DEFAULT_MOODS[:3])
-        
-        if st.form_submit_button("Add Person"):
-            st.session_state.persons.append({
-                'name': name,
-                'color': color,
-                'moods': moods,
-                'id': len(st.session_state.persons)
-            })
-            st.success(f"Added {name}!")
+        moods = st.multiselect("Moods", DEFAULT_MOODS, default=DEFAULT_MOODS[:3])
+        if st.form_submit_button("Add"):
+            if name:
+                add_person_db(name, color, moods)
+                st.rerun()
     
-    # Current persons
     st.divider()
-    st.subheader("Your People")
-    if st.session_state.persons:
-        for person in st.session_state.persons:
-            st.markdown(f"<span style='background:{person['color']}; width:12px; height:12px; border-radius:50%; display:inline-block; margin-right:8px;'></span> **{person['name']}**", unsafe_allow_html=True)
-    else:
-        st.info("No people added yet")
     
-    # Menstrual cycle tracking
-    st.divider()
-    st.subheader("Menstrual Cycle")
-    if st.session_state.persons:
-        person = st.selectbox("For Person", [p['name'] for p in st.session_state.persons])
-        person_id = [p['id'] for p in st.session_state.persons if p['name'] == person][0]
-        
-        start_date = st.date_input("Start Date", datetime.now())
-        cycle_length = st.slider("Cycle Length", 21, 40, 28)
-        
-        # Cycle template selection
-        selected_template = st.selectbox(
-            "Cycle Template", 
-            list(CYCLE_PRESETS.keys()),
-            index=0
-        )
-        
-        apply_future = st.checkbox("Apply to future cycles", True)
-        
-        if st.button("Apply Cycle", use_container_width=True):
-            applied_dates = apply_menstrual_cycle(
-                person_id, 
-                start_date, 
-                CYCLE_PRESETS[selected_template],
-                cycle_length,
-                apply_future
-            )
-            st.success(f"Applied to {len(applied_dates)} days!")
+    # Manage People
+    st.subheader("Manage People")
+    if persons:
+        for p in persons:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"<span style='color:{p['color']}'>●</span> {p['name']}", unsafe_allow_html=True)
+            with col2:
+                if st.button("🗑️", key=f"del_person_{p['id']}"):
+                    delete_person_db(p['id'])
+                    st.rerun()
     else:
-        st.info("Add people first")
+        st.info("No people yet.")
+        
+    st.divider()
+    
+    # Menstrual Cycle
+    st.subheader("Menstrual Cycle Tool")
+    if persons:
+        s_person_name = st.selectbox("Person", [p['name'] for p in persons])
+        s_person = next(p for p in persons if p['name'] == s_person_name)
+        
+        s_date = st.date_input("Start Date")
+        s_len = st.slider("Cycle Length", 21, 35, 28)
+        s_type = st.selectbox("Template", list(CYCLE_PRESETS.keys()))
+        s_future = st.checkbox("Future Cycles?", value=True)
+        
+        if st.button("Apply Cycle"):
+            apply_menstrual_cycle(s_person['id'], s_date, CYCLE_PRESETS[s_type], s_len, s_future)
+            st.success("Cycle Applied!")
+            st.rerun()
 
-# Main content
+# --- Main Render ---
 if st.session_state.current_view == "Monthly":
     show_monthly_view()
 elif st.session_state.current_view == "Weekly":
     show_weekly_view()
 else:
     show_yearly_view()
-
-
-
