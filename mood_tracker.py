@@ -186,9 +186,8 @@ def show_weekly_view():
             date = days[i]
             date_str = date.strftime('%Y-%m-%d')
             
-            # Day header
-            day极速赛车开奖直播官网
-_style = "border: 2px solid #ff4b4b;" if date.date() == datetime.now().date() else ""
+                       # Day header
+            day_style = "border: 2px solid #ff4b4b;" if date.date() == datetime.now().date() else ""
             st.markdown(f"<div style='padding: 10px; margin-bottom: 10px; text-align: center; background: #f0f2f6; border-radius: 10px; {day_style}'>"
                         f"<strong>{date.strftime('%a')}</strong><br>{date.day}"
                         f"</div>", unsafe_allow_html=True)
@@ -200,8 +199,7 @@ _style = "border: 2px solid #ff4b4b;" if date.date() == datetime.now().date() el
                         mood = st.session_state.mood_data[date_str][person['id']]
                         st.markdown(
                             f"<div style='display:flex; align-items:center; margin-bottom: 5px; font-size: 0.9em;'>"
-                            f"<span style极速赛车开奖直播官网
-='background:{person['color']}; width:10px; height:10px; "
+                            f"<span style='background:{person['color']}; width:10px; height:10px; "
                             f"border-radius:50%; margin-right:5px;'></span>"
                             f"<span>{mood}</span>"
                             f"</div>",
