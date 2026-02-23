@@ -10,8 +10,7 @@ from dateutil.relativedelta import relativedelta
 if 'persons' not in st.session_state:
     st.session_state.persons = []
     
-if 'mood_data' not极速赛车开奖直播官网
- in st.session_state:
+if 'mood_data' not in st.session_state:
     st.session_state.mood_data = {}
     
 if 'current_view' not in st.session_state:
