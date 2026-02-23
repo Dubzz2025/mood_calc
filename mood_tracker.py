@@ -4,6 +4,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 import pandas as pd
+import plotly.express as px
 from dateutil.relativedelta import relativedelta
 
 # --- 1. Database Setup ---
@@ -51,12 +52,15 @@ def load_mood_data():
 def update_mood_entry(date_str, person_id, mood, notes=None):
     conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
     c = conn.cursor()
-    if notes is None:
-        c.execute("SELECT notes FROM mood_entries WHERE date=? AND person_id=?", (date_str, person_id))
-        res = c.fetchone()
-        notes = res[0] if res else ""
-    c.execute("INSERT OR REPLACE INTO mood_entries (date, person_id, mood, notes) VALUES (?, ?, ?, ?)",
-              (date_str, person_id, mood, notes))
+    if mood is None: # Logic for deleting/clearing
+        c.execute("DELETE FROM mood_entries WHERE date=? AND person_id=?", (date_str, person_id))
+    else:
+        if notes is None:
+            c.execute("SELECT notes FROM mood_entries WHERE date=? AND person_id=?", (date_str, person_id))
+            res = c.fetchone()
+            notes = res[0] if res else ""
+        c.execute("INSERT OR REPLACE INTO mood_entries (date, person_id, mood, notes) VALUES (?, ?, ?, ?)",
+                  (date_str, person_id, mood, notes))
     conn.commit()
     conn.close()
 
@@ -100,7 +104,8 @@ MASTER_MOOD_BANK = ["😊 Happy", "😢 Sad", "😠 Angry", "😴 Tired", "💪 
 # --- 4. Sidebar ---
 with st.sidebar:
     st.title("Vibe Control")
-    view_mode = st.selectbox("View Mode", ["Monthly", "Weekly"])
+    app_mode = st.radio("App Section", ["Calendar View", "Analytics Tab"])
+    view_mode = st.selectbox("View Scale", ["Monthly", "Weekly"])
     
     with st.expander("👤 Manage People"):
         t1, t2 = st.tabs(["Edit/Delete", "Add New"])
@@ -131,20 +136,7 @@ with st.sidebar:
                     conn.execute("DELETE FROM mood_entries WHERE person_id=?", (p_obj['id'],))
                     conn.commit(); conn.close(); st.rerun()
 
-    if persons:
-        st.divider()
-        st.subheader("Menstrual Cycle Tool")
-        c_pers = st.selectbox("Apply to", [p['name'] for p in persons], key="cycle_p")
-        c_type = st.selectbox("Cycle Type", list(CYCLE_PRESETS.keys()))
-        c_date = st.date_input("Start Date", value=datetime.now())
-        c_len = st.slider("Length", 21, 35, 28)
-        c_ext = st.checkbox("Repeat 3 Months?")
-        if st.button("Apply Cycle"):
-            p_target = next(p for p in persons if p['name'] == c_pers)
-            apply_cycle_logic(p_target['id'], c_date, c_len, c_ext, c_type)
-            st.rerun()
-
-# --- 5. Calendar Grid Logic ---
+# --- 5. Logic Helper Functions ---
 def render_day_box(date_obj):
     ds = date_obj.strftime('%Y-%m-%d')
     is_today = date_obj.date() == datetime.now().date()
@@ -162,51 +154,87 @@ def render_day_box(date_obj):
         if persons:
             with st.popover("➕", use_container_width=True):
                 for p in persons:
-                    st.write(f"**{p['name']}**")
-                    cols = st.columns(3)
+                    # Colored Name Header
+                    st.markdown(f"<h3 style='color:{p['color']}; margin-bottom:0;'>{p['name']}</h3>", unsafe_allow_html=True)
+                    
+                    c1, c2 = st.columns([3, 1])
+                    with c2: # Clear Button
+                        if st.button("❌", key=f"clr_{ds}_{p['id']}", help="Clear mood"):
+                            update_mood_entry(ds, p['id'], None); st.rerun()
+                    
+                    mood_cols = st.columns(3)
                     for i, m in enumerate(p['moods']):
-                        if cols[i % 3].button(m, key=f"bt_{ds}_{p['id']}_{i}"):
+                        if mood_cols[i % 3].button(m, key=f"bt_{ds}_{p['id']}_{i}"):
                             update_mood_entry(ds, p['id'], m); st.rerun()
                     
                     note_val = mood_data.get(ds, {}).get(p['id'], {}).get('notes', "")
                     new_note = st.text_input("Note", value=note_val, key=f"nt_{ds}_{p['id']}")
                     if st.button("Save Note", key=f"sv_{ds}_{p['id']}"):
-                        current_mood = mood_data.get(ds, {}).get(p['id'], {}).get('mood', '😐 Neutral')
-                        update_mood_entry(ds, p['id'], current_mood, new_note); st.rerun()
+                        cur_m = mood_data.get(ds, {}).get(p['id'], {}).get('mood', '😐 Neutral')
+                        update_mood_entry(ds, p['id'], cur_m, new_note); st.rerun()
+                    st.divider()
 
-# --- 6. Main View Rendering ---
-nav_cols = st.columns([1, 1, 2, 1, 1])
-if nav_cols[0].button("◀ Previous"): 
-    move = relativedelta(months=1) if view_mode == "Monthly" else timedelta(days=7)
-    st.session_state.current_date -= move
-    st.rerun()
-if nav_cols[1].button("Today"):
-    st.session_state.current_date = datetime.now()
-    st.rerun()
-if nav_cols[4].button("Next ▶"): 
-    move = relativedelta(months=1) if view_mode == "Monthly" else timedelta(days=7)
-    st.session_state.current_date += move
-    st.rerun()
+# --- 6. Main View Switcher ---
+if app_mode == "Calendar View":
+    nav_cols = st.columns([1, 1, 2, 1, 1])
+    if nav_cols[0].button("◀ Previous"): 
+        move = relativedelta(months=1) if view_mode == "Monthly" else timedelta(days=7)
+        st.session_state.current_date -= move
+        st.rerun()
+    if nav_cols[1].button("Today"):
+        st.session_state.current_date = datetime.now()
+        st.rerun()
+    if nav_cols[4].button("Next ▶"): 
+        move = relativedelta(months=1) if view_mode == "Monthly" else timedelta(days=7)
+        st.session_state.current_date += move
+        st.rerun()
 
-if view_mode == "Monthly":
-    nav_cols[2].header(st.session_state.current_date.strftime('%B %Y'))
-    cols = st.columns(7)
-    for i, d in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]): 
-        cols[i].write(f"**{d}**")
-    
-    cal = calendar.monthcalendar(st.session_state.current_date.year, st.session_state.current_date.month)
-    for week in cal:
+    if view_mode == "Monthly":
+        nav_cols[2].header(st.session_state.current_date.strftime('%B %Y'))
+        cols = st.columns(7)
+        for i, d in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]): 
+            cols[i].write(f"**{d}**")
+        cal = calendar.monthcalendar(st.session_state.current_date.year, st.session_state.current_date.month)
+        for week in cal:
+            week_cols = st.columns(7)
+            for i, day in enumerate(week):
+                if day != 0:
+                    with week_cols[i]: render_day_box(datetime(st.session_state.current_date.year, st.session_state.current_date.month, day))
+    else:
+        nav_cols[2].header(f"Week of {st.session_state.current_date.strftime('%d %b %Y')}")
+        start_week = st.session_state.current_date - timedelta(days=st.session_state.current_date.weekday())
         week_cols = st.columns(7)
-        for i, day in enumerate(week):
-            if day != 0:
-                with week_cols[i]:
-                    render_day_box(datetime(st.session_state.current_date.year, st.session_state.current_date.month, day))
-else:
-    nav_cols[2].header(f"Week of {st.session_state.current_date.strftime('%d %b %Y')}")
-    start_week = st.session_state.current_date - timedelta(days=st.session_state.current_date.weekday())
-    week_cols = st.columns(7)
-    for i in range(7):
-        curr_day = start_week + timedelta(days=i)
-        with week_cols[i]:
-            st.write(f"**{curr_day.strftime('%a %d')}**")
-            render_day_box(curr_day)
+        for i in range(7):
+            curr_day = start_week + timedelta(days=i)
+            with week_cols[i]:
+                st.write(f"**{curr_day.strftime('%a %d')}**")
+                render_day_box(curr_day)
+
+else: # Analytics Tab
+    st.header("📊 Mood Analytics")
+    conn = sqlite3.connect('mood_tracker.db')
+    df_entries = pd.read_sql_query("SELECT * FROM mood_entries", conn)
+    df_persons = pd.read_sql_query("SELECT id, name, color FROM persons", conn)
+    conn.close()
+
+    if not df_entries.empty and not df_persons.empty:
+        df = df_entries.merge(df_persons, left_on='person_id', right_on='id')
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # 1. Mood Frequency Chart
+        st.subheader("Mood Distribution")
+        fig_pie = px.pie(df, names='mood', color='mood', hole=0.4, title="Overall Mood Breakdowns")
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # 2. Mood Timeline
+        st.subheader("Mood Timeline")
+        fig_line = px.scatter(df, x='date', y='name', color='mood', size_max=20, 
+                             color_discrete_map={p['name']: p['color'] for _, p in df_persons.iterrows()},
+                             title="Moods Over Time per Person")
+        st.plotly_chart(fig_line, use_container_width=True)
+        
+        # 3. Data Table
+        st.subheader("Raw Mood Log")
+        st.dataframe(df[['date', 'name', 'mood', 'notes']].sort_values('date', ascending=False), use_container_width=True)
+    else:
+        st.info("Add some people and track some moods to see analytics!")
