@@ -14,8 +14,16 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS persons
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, color TEXT, moods TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS mood_entries
-                 (date TEXT, person_id INTEGER, mood TEXT,
+                 (date TEXT, person_id INTEGER, mood TEXT, notes TEXT,
                   PRIMARY KEY (date, person_id))''')
+    conn.commit()
+    conn.close()
+
+def update_person_db(p_id, name, color, moods):
+    conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute("UPDATE persons SET name=?, color=?, moods=? WHERE id=?",
+              (name, color, json.dumps(moods), p_id))
     conn.commit()
     conn.close()
 
@@ -36,181 +44,142 @@ def add_person_db(name, color, moods):
     conn.commit()
     conn.close()
 
-def delete_person_db(person_id):
-    conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
-    c = conn.cursor()
-    c.execute("DELETE FROM persons WHERE id = ?", (person_id,))
-    c.execute("DELETE FROM mood_entries WHERE person_id = ?", (person_id,))
-    conn.commit()
-    conn.close()
-
 def get_mood_data():
     conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
     try:
         df = pd.read_sql_query("SELECT * FROM mood_entries", conn)
         data = {}
         for _, row in df.iterrows():
-            data.setdefault(row['date'], {})[row['person_id']] = row['mood']
+            data.setdefault(row['date'], {})[row['person_id']] = {
+                'mood': row['mood'],
+                'notes': row['notes'] or ""
+            }
         return data
     except: return {}
     finally: conn.close()
 
-def update_mood_entry(date_str, person_id, mood):
+def update_mood_entry(date_str, person_id, mood, notes=None):
     conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO mood_entries (date, person_id, mood) VALUES (?, ?, ?)",
-              (date_str, person_id, mood))
-    conn.commit()
-    conn.close()
-
-def delete_mood_entry(date_str, person_id):
-    conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
-    c = conn.cursor()
-    c.execute("DELETE FROM mood_entries WHERE date = ? AND person_id = ?", (date_str, person_id))
-    conn.commit()
-    conn.close()
-
-# --- Cycle Logic ---
-CYCLE_PRESETS = {
-    "Mood Cycle": [
-        {'name': 'Flow', 'start_day': 1, 'end_day': 5, 'mood': 'Flow'},
-        {'name': 'PMT', 'start_day': 20, 'end_day': 28, 'mood': 'PMT'},
-        {'name': 'Ovulation', 'start_day': 14, 'end_day': 14, 'mood': 'Ovulation'}
-    ]
-}
-
-def apply_cycle(person_id, start_date, template_key, cycle_length, apply_future):
-    current_date_obj = start_date
-    cycles = 3 if apply_future else 1
-    template = CYCLE_PRESETS[template_key]
+    if notes is None: # Preserve existing notes if only updating mood
+        c.execute("SELECT notes FROM mood_entries WHERE date=? AND person_id=?", (date_str, person_id))
+        res = c.fetchone()
+        notes = res[0] if res else ""
     
-    for _ in range(cycles):
-        for day_idx in range(cycle_length):
-            cycle_day = day_idx + 1
-            for phase in template:
-                if phase['start_day'] <= cycle_day <= phase['end_day']:
-                    update_mood_entry(current_date_obj.strftime('%Y-%m-%d'), person_id, phase['mood'])
-            current_date_obj += timedelta(days=1)
+    c.execute("INSERT OR REPLACE INTO mood_entries (date, person_id, mood, notes) VALUES (?, ?, ?, ?)",
+              (date_str, person_id, mood, notes))
+    conn.commit()
+    conn.close()
+
+def update_notes_only(date_str, person_id, notes):
+    conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
+    c = conn.cursor()
+    # Find existing mood or default to "Neutral" if adding notes first
+    c.execute("SELECT mood FROM mood_entries WHERE date=? AND person_id=?", (date_str, person_id))
+    res = c.fetchone()
+    mood = res[0] if res else "😐 Neutral"
+    
+    c.execute("INSERT OR REPLACE INTO mood_entries (date, person_id, mood, notes) VALUES (?, ?, ?, ?)",
+              (date_str, person_id, mood, notes))
+    conn.commit()
+    conn.close()
 
 # --- App Logic ---
 init_db()
-st.set_page_config(layout="wide", page_title="Mood Calendar", page_icon="🗓️")
-
-if 'current_date' not in st.session_state:
-    st.session_state.current_date = datetime.now()
+st.set_page_config(layout="wide", page_title="Mood Calendar", page_icon="📝")
 
 persons = get_persons()
 mood_data = get_mood_data()
 DEFAULT_MOODS = ["😊 Happy", "😢 Sad", "😠 Angry", "😴 Tired", "💪 Energetic", "😐 Neutral", "🩸 Flow", "⚡ PMT"]
 
-# --- UI Helper ---
+# --- Calendar Cell ---
 def render_day_cell(date_obj):
     date_str = date_obj.strftime('%Y-%m-%d')
-    is_today = date_obj.date() == datetime.now().date()
-    bg_color = "#fff4f4" if is_today else "transparent"
-    
     with st.container(border=True):
-        st.markdown(f"<div style='text-align: center; background-color:{bg_color}; border-radius:5px;'>{date_obj.day}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; font-weight: bold;'>{date_obj.day}</div>", unsafe_allow_html=True)
         
         if date_str in mood_data:
             for p in persons:
                 if p['id'] in mood_data[date_str]:
-                    m = mood_data[date_str][p['id']]
-                    st.markdown(f"<div style='font-size: 0.75em; color:{p['color']};'>● {m}</div>", unsafe_allow_html=True)
+                    entry = mood_data[date_str][p['id']]
+                    st.markdown(f"<div style='font-size: 0.75em; color:{p['color']}; font-weight: 600;'>● {entry['mood']}</div>", unsafe_allow_html=True)
+                    if entry['notes']:
+                        st.markdown(f"<div style='font-size: 0.65em; font-style: italic; color: #666;'>“{entry['notes'][:20]}...”</div>", unsafe_allow_html=True)
         
         if persons:
             with st.popover("➕", use_container_width=True):
                 for p in persons:
-                    st.write(f"**Assign to {p['name']}**")
+                    st.subheader(f"{p['name']}")
                     cols = st.columns(3)
                     for i, m_opt in enumerate(p['moods']):
-                        if cols[i % 3].button(m_opt, key=f"{date_str}_{p['id']}_{i}"):
+                        if cols[i % 3].button(m_opt, key=f"btn_{date_str}_{p['id']}_{i}"):
                             update_mood_entry(date_str, p['id'], m_opt)
                             st.rerun()
-                    if date_str in mood_data and p['id'] in mood_data[date_str]:
-                        st.button("❌ Clear", key=f"del_{date_str}_{p['id']}", 
-                                  on_click=delete_mood_entry, args=(date_str, p['id']))
+                    
+                    # Notes Field
+                    existing_notes = mood_data.get(date_str, {}).get(p['id'], {}).get('notes', "")
+                    new_note = st.text_area("Notes", value=existing_notes, key=f"note_{date_str}_{p['id']}", height=80)
+                    if st.button("Save Note", key=f"save_note_{date_str}_{p['id']}"):
+                        update_notes_only(date_str, p['id'], new_note)
+                        st.rerun()
+                    st.divider()
 
 # --- Sidebar ---
 with st.sidebar:
     st.title("Vibe Control")
-    view_mode = st.radio("View", ["Monthly", "Weekly", "Yearly"])
+    view_mode = st.radio("View", ["Monthly", "Weekly"])
     
-    with st.expander("👤 Setup New Person"):
-        with st.form("add_p"):
-            name = st.text_input("Name")
-            color = st.color_picker("Personal Color", "#FF4B4B")
-            moods = st.multiselect("Available Moods", DEFAULT_MOODS, default=DEFAULT_MOODS[:6])
-            if st.form_submit_button("Create Profile"):
-                add_person_db(name, color, moods)
-                st.rerun()
+    # --- Edit Profiles ---
+    with st.expander("⚙️ Edit Profiles / Add Person"):
+        tab1, tab2 = st.tabs(["Edit Existing", "Add New"])
+        
+        with tab1:
+            if persons:
+                edit_name = st.selectbox("Select Profile", [p['name'] for p in persons])
+                p_to_edit = next(p for p in persons if p['name'] == edit_name)
+                
+                new_name = st.text_input("Name", value=p_to_edit['name'])
+                new_color = st.color_picker("Color", value=p_to_edit['color'])
+                new_moods = st.multiselect("Mood Options", DEFAULT_MOODS, default=p_to_edit['moods'])
+                
+                if st.button("Update Profile"):
+                    update_person_db(p_to_edit['id'], new_name, new_color, new_moods)
+                    st.rerun()
+            else: st.info("No profiles to edit.")
 
-    if persons:
-        st.divider()
-        st.subheader("Manage People")
-        for p in persons:
-            c1, c2 = st.columns([4, 1])
-            c1.markdown(f"<span style='color:{p['color']}'>●</span> {p['name']}", unsafe_allow_html=True)
-            if c2.button("🗑️", key=f"sidebar_del_{p['id']}"):
-                delete_person_db(p['id'])
-                st.rerun()
+        with tab2:
+            with st.form("new_p"):
+                name = st.text_input("Name")
+                color = st.color_picker("Color", "#FF4B4B")
+                moods = st.multiselect("Moods", DEFAULT_MOODS, default=DEFAULT_MOODS[:6])
+                if st.form_submit_button("Create"):
+                    add_person_db(name, color, moods)
+                    st.rerun()
 
-        st.divider()
-        st.subheader("Cycle Tool")
-        target_name = st.selectbox("Assign to", [p['name'] for p in persons])
-        target_p = next(p for p in persons if p['name'] == target_name)
-        start_date = st.date_input("Start Date", value=datetime.now())
-        if st.button("Apply Mood Cycle"):
-            apply_cycle(target_p['id'], start_date, "Mood Cycle", 28, True)
-            st.success("Cycle generated!")
-            st.rerun()
-
+    # --- Export ---
     st.divider()
-    st.subheader("Data Export")
-    if st.button("Prepare CSV"):
+    if st.button("Prepare Export"):
         conn = sqlite3.connect('mood_tracker.db')
-        export_df = pd.read_sql_query("""
-            SELECT mood_entries.date, persons.name, mood_entries.mood 
-            FROM mood_entries 
-            JOIN persons ON mood_entries.person_id = persons.id
-        """, conn)
-        conn.close()
-        csv = export_df.to_csv(index=False).encode('utf-8')
-        st.download_button("Download CSV", data=csv, file_name="mood_export.csv", mime="text/csv")
+        df = pd.read_sql_query("SELECT date, mood, notes FROM mood_entries", conn)
+        st.download_button("Download CSV", df.to_csv(index=False), "export.csv", "text/csv")
 
-# --- Render Calendar ---
-if view_mode == "Monthly":
-    col1, col2, col3 = st.columns([1, 4, 1])
-    if col1.button("◀"): st.session_state.current_date -= relativedelta(months=1); st.rerun()
-    col2.header(st.session_state.current_date.strftime('%B %Y'))
-    if col3.button("▶"): st.session_state.current_date += relativedelta(months=1); st.rerun()
-    
-    cal = calendar.monthcalendar(st.session_state.current_date.year, st.session_state.current_date.month)
+# --- Render Calendar (Shared Logic) ---
+if 'current_date' not in st.session_state: st.session_state.current_date = datetime.now()
+
+# Navigation & Header
+c1, c2, c3 = st.columns([1, 4, 1])
+if c1.button("◀"): st.session_state.current_date -= relativedelta(months=1); st.rerun()
+c2.header(st.session_state.current_date.strftime('%B %Y'))
+if c3.button("▶"): st.session_state.current_date += relativedelta(months=1); st.rerun()
+
+# Calendar Grid
+cal = calendar.monthcalendar(st.session_state.current_date.year, st.session_state.current_date.month)
+header_cols = st.columns(7)
+for i, d in enumerate(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']): header_cols[i].write(f"**{d}**")
+
+for week in cal:
     cols = st.columns(7)
-    for i, day in enumerate(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']):
-        cols[i].write(f"**{day}**")
-    
-    for week in cal:
-        cols = st.columns(7)
-        for i, day in enumerate(week):
-            if day != 0:
-                with cols[i]:
-                    render_day_cell(datetime(st.session_state.current_date.year, st.session_state.current_date.month, day))
-
-elif view_mode == "Weekly":
-    start = st.session_state.current_date - timedelta(days=st.session_state.current_date.weekday())
-    cols = st.columns(7)
-    for i in range(7):
-        day = start + timedelta(days=i)
-        with cols[i]:
-            st.write(f"**{day.strftime('%a %d')}**")
-            render_day_cell(day)
-
-elif view_mode == "Yearly":
-    st.header(f"Overview {st.session_state.current_date.year}")
-    # Simple pie chart of all logged moods
-    flat_moods = [m for day in mood_data.values() for m in day.values()]
-    if flat_moods:
-        df = pd.DataFrame(flat_moods, columns=['Mood'])
-        fig = px.pie(df, names='Mood', hole=0.4, color_discrete_sequence=px.colors.qualitative.Safe)
-        st.plotly_chart(fig, use_container_width=True)
+    for i, day in enumerate(week):
+        if day != 0:
+            with cols[i]:
+                render_day_cell(datetime(st.session_state.current_date.year, st.session_state.current_date.month, day))
