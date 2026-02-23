@@ -16,7 +16,6 @@ def init_db():
                  (date TEXT, person_id INTEGER, mood TEXT, notes TEXT,
                   PRIMARY KEY (date, person_id))''')
     
-    # Self-healing: Check for 'notes' column
     c.execute("PRAGMA table_info(mood_entries)")
     columns = [column[1] for column in c.fetchall()]
     if 'notes' not in columns:
@@ -127,4 +126,56 @@ with st.sidebar:
                         conn.execute("UPDATE persons SET name=?, color=?, moods=? WHERE id=?", (new_n, new_c, json.dumps(new_m), p_obj['id']))
                         conn.commit(); conn.close(); st.rerun()
                 if st.button("🗑️ Delete Person"):
-                    conn = sqlite3.connect('mood_tracker.
+                    conn = sqlite3.connect('mood_tracker.db')
+                    conn.execute("DELETE FROM persons WHERE id=?", (p_obj['id'],))
+                    conn.execute("DELETE FROM mood_entries WHERE person_id=?", (p_obj['id'],))
+                    conn.commit(); conn.close(); st.rerun()
+
+    if persons:
+        st.divider()
+        st.subheader("Menstrual Cycle Tool")
+        c_pers = st.selectbox("Apply to", [p['name'] for p in persons], key="cycle_p")
+        c_type = st.selectbox("Cycle Type", list(CYCLE_PRESETS.keys()))
+        c_date = st.date_input("Start Date", value=datetime.now())
+        c_len = st.slider("Length", 21, 35, 28)
+        c_ext = st.checkbox("Repeat 3 Months?")
+        if st.button("Apply Cycle"):
+            p_target = next(p for p in persons if p['name'] == c_pers)
+            apply_cycle_logic(p_target['id'], c_date, c_len, c_ext, c_type)
+            st.rerun()
+
+# --- 5. Calendar Grid Logic ---
+def render_day_box(date_obj):
+    ds = date_obj.strftime('%Y-%m-%d')
+    is_today = date_obj.date() == datetime.now().date()
+    
+    with st.container(border=True):
+        st.write(f"**{date_obj.day}**" + (" (Today)" if is_today else ""))
+        if ds in mood_data:
+            for p in persons:
+                if p['id'] in mood_data[ds]:
+                    entry = mood_data[ds][p['id']]
+                    st.markdown(f"<span style='color:{p['color']}; font-weight:bold;'>● {entry['mood']}</span>", unsafe_allow_html=True)
+                    if entry['notes']:
+                        st.markdown(f"<small style='color:gray; display:block;'>{entry['notes'][:12]}...</small>", unsafe_allow_html=True)
+        
+        if persons:
+            with st.popover("➕", use_container_width=True):
+                for p in persons:
+                    st.write(f"**{p['name']}**")
+                    cols = st.columns(3)
+                    for i, m in enumerate(p['moods']):
+                        if cols[i % 3].button(m, key=f"bt_{ds}_{p['id']}_{i}"):
+                            update_mood_entry(ds, p['id'], m); st.rerun()
+                    
+                    note_val = mood_data.get(ds, {}).get(p['id'], {}).get('notes', "")
+                    new_note = st.text_input("Note", value=note_val, key=f"nt_{ds}_{p['id']}")
+                    if st.button("Save Note", key=f"sv_{ds}_{p['id']}"):
+                        current_mood = mood_data.get(ds, {}).get(p['id'], {}).get('mood', '😐 Neutral')
+                        update_mood_entry(ds, p['id'], current_mood, new_note); st.rerun()
+
+# --- 6. Main View Rendering ---
+nav_cols = st.columns([1, 1, 2, 1, 1])
+if nav_cols[0].button("◀ Previous"): 
+    move = relativedelta(months=1) if view_mode == "Monthly" else timedelta(days=7)
+    st.
