@@ -143,10 +143,9 @@ with st.sidebar:
         
         with tab_edit:
             if persons:
-                p_name = st.selectbox("Select Profile", [p['name'] for p in persons])
-                p_to_edit = next(p for p in persons if p['name'] == p_name)
+                p_name_sel = st.selectbox("Select Profile", [p['name'] for p in persons])
+                p_to_edit = next(p for p in persons if p['name'] == p_name_sel)
                 
-                # Edit Area
                 with st.form(f"edit_form_{p_to_edit['id']}"):
                     upd_name = st.text_input("Name", p_to_edit['name'])
                     upd_color = st.color_picker("Color", p_to_edit['color'])
@@ -157,59 +156,12 @@ with st.sidebar:
                         st.rerun()
                 
                 st.divider()
-                if st.button(f"🗑️ Delete {p_name}", type="primary"):
+                if st.button(f"🗑️ Delete {p_name_sel}", type="primary"):
                     delete_person_db(p_to_edit['id']); st.rerun()
             else: st.info("No profiles yet.")
 
     if persons:
         st.divider()
         st.subheader("Mood Cycle Tool")
-        target_p = st.selectbox("Apply to", [p['name'] for p in persons], key="cycle_p")
-        p_obj = next(p for p in persons if p['name'] == target_p)
-        cycle_choice = st.selectbox("Select Cycle Type", list(CYCLE_PRESETS.keys()))
-        c_start = st.date_input("Start Date", value=datetime.now())
-        c_len = st.slider("Cycle Length", 21, 35, 28)
-        c_future = st.checkbox("Apply 3 cycles?", value=True)
-        if st.button("Generate Cycle"):
-            apply_cycle_logic(p_obj['id'], c_start, c_len, c_future, cycle_choice)
-            st.success(f"{cycle_choice} Applied!"); st.rerun()
-
-    st.divider()
-    if st.button("Prepare Export"):
-        conn = sqlite3.connect('mood_tracker.db')
-        df_export = pd.read_sql_query("SELECT * FROM mood_entries", conn)
-        st.download_button("Download CSV", df_export.to_csv(index=False), "mood_data.csv", "text/csv")
-
-# --- 5. Calendar Rendering ---
-def render_day_cell(date_obj):
-    date_str = date_obj.strftime('%Y-%m-%d')
-    with st.container(border=True):
-        st.markdown(f"**{date_obj.day}**")
-        if date_str in mood_data:
-            for p in persons:
-                if p['id'] in mood_data[date_str]:
-                    entry = mood_data[date_str][p['id']]
-                    st.markdown(f"<div style='font-size:0.75em; color:{p['color']}; font-weight:bold;'>● {entry['mood']}</div>", unsafe_allow_html=True)
-                    if entry['notes']:
-                        st.markdown(f"<div style='font-size:0.7em; color:gray; font-style:italic;'>{entry['notes'][:15]}...</div>", unsafe_allow_html=True)
-        
-        if persons:
-            with st.popover("➕", use_container_width=True):
-                for p in persons:
-                    st.subheader(p['name'])
-                    cols = st.columns(3)
-                    for i, m in enumerate(p['moods']):
-                        if cols[i%3].button(m, key=f"btn_{date_str}_{p['id']}_{i}"):
-                            update_mood_entry(date_str, p['id'], m); st.rerun()
-                    
-                    existing_note = mood_data.get(date_str, {}).get(p['id'], {}).get('notes', "")
-                    note = st.text_input("Note", key=f"n_{date_str}_{p['id']}", value=existing_note)
-                    if st.button("Save Note", key=f"s_{date_str}_{p['id']}"):
-                        current_mood = mood_data.get(date_str, {}).get(p['id'], {}).get('mood', '😐 Neutral')
-                        update_mood_entry(date_str, p['id'], current_mood, note); st.rerun()
-                    st.divider()
-
-# --- 6. Main View Switcher ---
-c1, c2, c3 = st.columns([1, 4, 1])
-if view_mode == "Monthly":
-    if c
+        target_p_name = st.selectbox("Apply to", [p['name'] for p in persons], key="cycle_p")
+        p_obj = next(p for p in persons if p['name'] == target_p_name)
