@@ -178,4 +178,35 @@ def render_day_box(date_obj):
 nav_cols = st.columns([1, 1, 2, 1, 1])
 if nav_cols[0].button("◀ Previous"): 
     move = relativedelta(months=1) if view_mode == "Monthly" else timedelta(days=7)
-    st.
+    st.session_state.current_date -= move
+    st.rerun()
+if nav_cols[1].button("Today"):
+    st.session_state.current_date = datetime.now()
+    st.rerun()
+if nav_cols[4].button("Next ▶"): 
+    move = relativedelta(months=1) if view_mode == "Monthly" else timedelta(days=7)
+    st.session_state.current_date += move
+    st.rerun()
+
+if view_mode == "Monthly":
+    nav_cols[2].header(st.session_state.current_date.strftime('%B %Y'))
+    cols = st.columns(7)
+    for i, d in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]): 
+        cols[i].write(f"**{d}**")
+    
+    cal = calendar.monthcalendar(st.session_state.current_date.year, st.session_state.current_date.month)
+    for week in cal:
+        week_cols = st.columns(7)
+        for i, day in enumerate(week):
+            if day != 0:
+                with week_cols[i]:
+                    render_day_box(datetime(st.session_state.current_date.year, st.session_state.current_date.month, day))
+else:
+    nav_cols[2].header(f"Week of {st.session_state.current_date.strftime('%d %b %Y')}")
+    start_week = st.session_state.current_date - timedelta(days=st.session_state.current_date.weekday())
+    week_cols = st.columns(7)
+    for i in range(7):
+        curr_day = start_week + timedelta(days=i)
+        with week_cols[i]:
+            st.write(f"**{curr_day.strftime('%a %d')}**")
+            render_day_box(curr_day)
