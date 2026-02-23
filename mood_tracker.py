@@ -11,14 +11,12 @@ from dateutil.relativedelta import relativedelta
 def init_db():
     conn = sqlite3.connect('mood_tracker.db', check_same_thread=False)
     c = conn.cursor()
-    # Create tables if they don't exist
     c.execute('''CREATE TABLE IF NOT EXISTS persons
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, color TEXT, moods TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS mood_entries
                  (date TEXT, person_id INTEGER, mood TEXT,
                   PRIMARY KEY (date, person_id))''')
     
-    # Check for missing columns (Self-Healing)
     c.execute("PRAGMA table_info(mood_entries)")
     columns = [column[1] for column in c.fetchall()]
     if 'notes' not in columns:
@@ -42,10 +40,8 @@ def load_mood_data():
         df_m = pd.read_sql_query("SELECT * FROM mood_entries", conn)
         processed_data = {}
         for _, row in df_m.iterrows():
-            # .get() prevents KeyError if the column is missing mid-load
             note_val = row.get('notes', "") 
             if pd.isna(note_val): note_val = ""
-            
             processed_data.setdefault(row['date'], {})[row['person_id']] = {
                 'mood': row['mood'],
                 'notes': note_val
@@ -74,15 +70,33 @@ def delete_person_db(p_id):
     conn.commit()
     conn.close()
 
-# --- 2. Cycle Tool Logic ---
-def apply_cycle(person_id, start_date, cycle_length, apply_future):
-    current_date_obj = start_date
-    cycles = 3 if apply_future else 1
-    template = [
+# --- 2. Cycle Tool Presets & Logic ---
+CYCLE_PRESETS = {
+    "Standard Cycle": [
         {'start': 1, 'end': 5, 'mood': '🩸 Flow'},
         {'start': 14, 'end': 14, 'mood': '🥚 Ovulation'},
         {'start': 20, 'end': 28, 'mood': '⚡ PMT'}
+    ],
+    "Fertility Focus": [
+        {'start': 1, 'end': 5, 'mood': '🩸 Flow'},
+        {'start': 10, 'end': 16, 'mood': '✨ Fertile'},
+        {'start': 14, 'end': 14, 'mood': '🥚 Ovulation'},
+        {'start': 24, 'end': 28, 'mood': '⚡ PMT'}
+    ],
+    "Symptom Heavy": [
+        {'start': 1, 'end': 5, 'mood': '🩸 Flow'},
+        {'start': 6, 'end': 9, 'mood': '🩹 Post-Flow'},
+        {'start': 14, 'end': 14, 'mood': '🥚 Ovulation'},
+        {'start': 18, 'end': 23, 'mood': '🎈 Bloated'},
+        {'start': 24, 'end': 28, 'mood': '⚡ PMT'}
     ]
+}
+
+def apply_cycle_logic(person_id, start_date, cycle_length, apply_future, preset_name):
+    current_date_obj = start_date
+    cycles = 3 if apply_future else 1
+    template = CYCLE_PRESETS[preset_name]
+    
     for _ in range(cycles):
         for day_idx in range(cycle_length):
             cycle_day = day_idx + 1
@@ -100,7 +114,7 @@ if 'current_date' not in st.session_state:
 
 persons = get_persons()
 mood_data = load_mood_data()
-DEFAULT_MOODS = ["😊 Happy", "😢 Sad", "😠 Angry", "😴 Tired", "💪 Energetic", "😐 Neutral", "🩸 Flow", "⚡ PMT"]
+DEFAULT_MOODS = ["😊 Happy", "😢 Sad", "😠 Angry", "😴 Tired", "💪 Energetic", "😐 Neutral", "🩸 Flow", "⚡ PMT", "✨ Fertile", "🎈 Bloated"]
 
 # --- 4. Sidebar UI ---
 with st.sidebar:
@@ -123,13 +137,11 @@ with st.sidebar:
             if persons:
                 p_name = st.selectbox("Select Profile", [p['name'] for p in persons])
                 p_to_edit = next(p for p in persons if p['name'] == p_name)
-                # Option to update color/moods
                 new_color = st.color_picker("Change Color", p_to_edit['color'], key="upd_col")
                 if st.button("Update Color"):
                     conn = sqlite3.connect('mood_tracker.db'); c = conn.cursor()
                     c.execute("UPDATE persons SET color=? WHERE id=?", (new_color, p_to_edit['id']))
                     conn.commit(); conn.close(); st.rerun()
-                
                 st.divider()
                 if st.button(f"🗑️ Delete {p_name}", type="primary"):
                     delete_person_db(p_to_edit['id']); st.rerun()
@@ -140,12 +152,16 @@ with st.sidebar:
         st.subheader("Mood Cycle Tool")
         target_p = st.selectbox("Apply to", [p['name'] for p in persons], key="cycle_p")
         p_obj = next(p for p in persons if p['name'] == target_p)
+        
+        # --- Dropdown for Cycle Choices ---
+        cycle_choice = st.selectbox("Select Cycle Type", list(CYCLE_PRESETS.keys()))
+        
         c_start = st.date_input("Start Date", value=datetime.now())
         c_len = st.slider("Cycle Length", 21, 35, 28)
         c_future = st.checkbox("Apply 3 cycles?", value=True)
         if st.button("Generate Cycle"):
-            apply_cycle(p_obj['id'], c_start, c_len, c_future)
-            st.success("Cycle Generated!"); st.rerun()
+            apply_cycle_logic(p_obj['id'], c_start, c_len, c_future, cycle_choice)
+            st.success(f"{cycle_choice} Applied!"); st.rerun()
 
     st.divider()
     if st.button("Prepare Export"):
