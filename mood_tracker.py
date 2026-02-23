@@ -109,7 +109,6 @@ def show_monthly_view():
     weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     for i, col in enumerate(cols):
         col.markdown(f"**{weekdays[i]}**")
-    
     for week in cal:
         # Create columns for the current week
 week_cols = st.columns(len(week))
